@@ -42,8 +42,8 @@ class FTRLBOBW(Bandit):
 
     alpha: float | None = None
     d: float = 2.0
-    solver_iters: int = eqx.field(static=True, default=50)
-    newton_iters: int = eqx.field(static=True, default=30)
+    solver_iters: int = eqx.field(static=True, default=32)
+    newton_iters: int = eqx.field(static=True, default=20)
 
     def _alpha(self, num_arms: int) -> float:
         if self.alpha is not None:
@@ -125,7 +125,7 @@ class FTRLBOBW(Bandit):
                 dg = beta * (alpha - 1) * q ** (alpha - 2) - gamma / q**2
                 return q - g / dg
 
-            return jax.lax.fori_loop(0, self.newton_iters, newton, q)
+            return jax.lax.fori_loop(0, self.newton_iters, newton, q, unroll=True)
 
         # At lam_lo the leading arm has q >= 1; at lam_hi every arm has q <= 1/K.
         lam_lo = beta + gamma

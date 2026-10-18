@@ -54,11 +54,17 @@ class Bandit(eqx.Module):
 
     @eqx.filter_jit
     def train(
-        self, key: PRNGKeyArray, env: Environment, state: PyTree | None = None
+        self,
+        key: PRNGKeyArray,
+        env: Environment,
+        state: PyTree | None = None,
+        per_step_metrics: bool = True,
     ) -> tuple[PyTree, dict[str, Array]]:
         """Plays `num_steps` rounds on `env`, updating the state online.
 
-        Returns the final state and per-round metrics (arm, reward, pseudo-regret).
+        Returns the final state and metrics. With `per_step_metrics=True` these are per-round
+        arrays (arm, reward, pseudo-regret); otherwise only the totals (reward, pseudo-regret)
+        are returned, which keeps memory constant in `num_steps`.
         """
         num_arms = self.__check_env__(env)
         init_key, reset_key, key = jax.random.split(key, 3)
@@ -67,18 +73,25 @@ class Bandit(eqx.Module):
         _, env_state = env.reset(reset_key)
 
         def round_(carry, _):
-            state, env_state, key = carry
+            state, env_state, key, totals = carry
             key, arm_key, step_key = jax.random.split(key, 3)
             arm, state = self.select_arm(arm_key, state)
             (_, reward, _, _, info), env_state = env.step(step_key, env_state, arm)
             state = self.update(state, arm, reward)
+            totals = {
+                "reward": totals["reward"] + reward,
+                "regret": totals["regret"] + info["regret"],
+            }
             metrics = {"arm": arm, "reward": reward, "regret": info["regret"]}
-            return (state, env_state, key), metrics
+            return (state, env_state, key, totals), (
+                metrics if per_step_metrics else None
+            )
 
-        (state, _, _), metrics = jax.lax.scan(
-            round_, (state, env_state, key), None, length=self.num_steps
+        totals = {"reward": jnp.array(0.0), "regret": jnp.array(0.0)}
+        (state, _, _, totals), metrics = jax.lax.scan(
+            round_, (state, env_state, key, totals), None, length=self.num_steps
         )
-        return state, metrics
+        return state, metrics if per_step_metrics else totals
 
     @eqx.filter_jit
     def evaluate(
